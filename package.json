@@ -1,0 +1,15 @@
+{
+  "name": "@rocketman-streamkit/addon-streamlabs",
+  "version": "1.0.0",
+  "private": true,
+  "description": "StreamKit+ integration addon: streamlabs",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.5",
+    "@rocketman-streamkit/types": "^1.0.33",
+    "typescript": "^5.8.3"
+  }
+}

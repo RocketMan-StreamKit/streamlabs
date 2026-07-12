@@ -1,0 +1,26 @@
+{
+  "id": "streamlabs",
+  "name": {
+    "en": "StreamLabs",
+    "ru": "StreamLabs",
+    "uk": "StreamLabs"
+  },
+  "description": {
+    "en": "StreamLabs integration: OAuth login and donation alerts via API polling.",
+    "ru": "Интеграция StreamLabs: OAuth-авторизация и донаты через API.",
+    "uk": "Інтеграція StreamLabs: OAuth-авторизація та донати через API."
+  },
+  "type": "platform.donation",
+  "version": "1.0.0",
+  "author": "RocketMan System",
+  "icon": "logo.png",
+  "permissions": [
+    "NETWORK_REQUEST",
+    "NETWORK_WEBSOCKET",
+    "WEB_END_POINTS",
+    "DASHBOARD_EVENTS",
+    "STATUS",
+    "NOTIFY"
+  ],
+  "app_version": "1.0.33"
+}
