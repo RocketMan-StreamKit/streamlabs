@@ -2,11 +2,17 @@ import { StreamLabsApi } from './api';
 import {
   buildAuthServerSelectOptions,
   DEFAULT_API_SERVER,
+  PLATFORM_AGNOSTIC_EVENTS,
   resolveApiServerUrl,
+  TWITCH_EVENTS,
+  YOUTUBE_EVENTS,
 } from './constants';
 import { buildLogoutLabel, formatAccountLabel, logoutFallback } from './locale';
 import { mergeStreamLabsParams } from './params';
 import { startStreamLabsTracking, stopStreamLabsTracking } from './tracking';
+
+const anyEventEnabled = (events: ReadonlyArray<{ key: string; label: unknown }>, params: Record<string, unknown>) =>
+  events.some(e => params[e.key] === true);
 
 events.On('streamlabsTestDonation', async () => {
   const params = await api.config.getParams<{ user_name?: string }>();
@@ -51,6 +57,18 @@ const clearStreamLabsAuth = () => {
     StreamLabsApi.accessToken = null;
     RegenerateConfig();
   });
+};
+
+const pushEventFields = (
+  fields: Parameters<typeof GenerateConfig>[0],
+  events: ReadonlyArray<{ key: string; label: Record<string, string> }>,
+  sectionLabel: Record<string, string>,
+  params: Record<string, unknown>
+) => {
+  fields.push({ type: 'info', key: `section_${sectionLabel.en}`, editor: { description: sectionLabel } });
+  for (const ev of events) {
+    fields.push({ key: ev.key, type: 'boolean', default: false, editor: { label: ev.label } });
+  }
 };
 
 export const RegenerateConfig = () => {
@@ -153,6 +171,25 @@ export const RegenerateConfig = () => {
           },
         },
       });
+
+      pushEventFields(fields, TWITCH_EVENTS, { en: 'Twitch events', ru: 'События Twitch', uk: 'Події Twitch' }, params);
+
+      if (anyEventEnabled(TWITCH_EVENTS, params)) {
+        fields.push({
+          type: 'info',
+          key: 'twitch_dup_warning',
+          editor: {
+            description: {
+              en: 'If the Twitch addon is active, duplicate events may appear',
+              ru: 'Если аддон Twitch активен, возможны дублирующие события',
+              uk: 'Якщо аддон Twitch активний, можливі дублюючі події',
+            },
+          },
+        });
+      }
+
+      pushEventFields(fields, YOUTUBE_EVENTS, { en: 'YouTube events', ru: 'События YouTube', uk: 'Події YouTube' }, params);
+      pushEventFields(fields, PLATFORM_AGNOSTIC_EVENTS, { en: 'Other events', ru: 'Другие события', uk: 'Інші події' }, params);
     } else {
       fields.push({
         type: 'button',

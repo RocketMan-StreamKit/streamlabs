@@ -1,20 +1,25 @@
 import { StreamLabsApi } from './api';
 import { SOCKET_URL } from './constants';
-import { pushDonation } from './dashboard-feed';
+import { pushBits, pushDonation, pushFollow, pushHost, pushMerch, pushRaid, pushResubscription, pushSubscription } from './dashboard-feed';
 
 type WsConnection = Awaited<ReturnType<(typeof network.websocket)['connect']>>;
 
+type EventMessage = Record<string, unknown> & {
+  id?: number;
+  name?: string;
+  message?: string;
+  amount?: number | string;
+  months?: number;
+  currency?: string;
+  sub_plan?: string;
+  sub_plan_name?: string;
+  product?: string;
+};
+
 type StreamLabsEvent = {
   type: string;
-  message?: Array<{
-    id?: number;
-    donation_id?: string;
-    name?: string;
-    message?: string;
-    amount?: number;
-    currency?: string;
-    [key: string]: unknown;
-  }>;
+  for?: string;
+  message?: EventMessage[];
 };
 
 const RECONNECT_DELAY_MS = 5000;
@@ -22,6 +27,121 @@ const HANDSHAKE_TIMEOUT_MS = 15000;
 
 const removePrefix = (raw: string, prefix: string) =>
   raw.startsWith(prefix) ? raw.slice(prefix.length) : null;
+
+const isTwitch = (forField?: string) => forField === 'twitch_account';
+const isYoutube = (forField?: string) => forField === 'youtube_account';
+
+const readTrackingSettings = async (): Promise<Record<string, boolean>> => {
+  try {
+    const params = await api.config.getParams<Record<string, unknown>>();
+    return {
+      track_twitch_subscription: params.track_twitch_subscription === true,
+      track_twitch_resubscription: params.track_twitch_resubscription === true,
+      track_twitch_follow: params.track_twitch_follow === true,
+      track_twitch_bits: params.track_twitch_bits === true,
+      track_twitch_raid: params.track_twitch_raid === true,
+      track_twitch_host: params.track_twitch_host === true,
+      track_youtube_subscription: params.track_youtube_subscription === true,
+      track_youtube_resubscription: params.track_youtube_resubscription === true,
+      track_youtube_follow: params.track_youtube_follow === true,
+      track_merch: params.track_merch === true,
+    };
+  } catch {
+    return {
+      track_twitch_subscription: false,
+      track_twitch_resubscription: false,
+      track_twitch_follow: false,
+      track_twitch_bits: false,
+      track_twitch_raid: false,
+      track_twitch_host: false,
+      track_youtube_subscription: false,
+      track_youtube_resubscription: false,
+      track_youtube_follow: false,
+      track_merch: false,
+    };
+  }
+};
+
+const routeEvent = async (eventType: string, forField: string | undefined, messages: EventMessage[]) => {
+  const settings = await readTrackingSettings();
+
+  for (const msg of messages) {
+    const rawAmount = msg.amount;
+
+    switch (eventType) {
+      case 'donation': {
+        const amount =
+          typeof rawAmount === 'number'
+            ? rawAmount
+            : typeof rawAmount === 'string'
+              ? parseFloat(rawAmount)
+              : 0;
+        void pushDonation({
+          donation_id: String(msg.id ?? Date.now()),
+          created_at: new Date().toISOString(),
+          currency: (msg.currency as string) ?? 'USD',
+          amount: isNaN(amount) ? 0 : amount,
+          name: msg.name ?? 'Anonymous',
+          message: msg.message ?? '',
+        });
+        break;
+      }
+      case 'subscription': {
+        const enabled = isTwitch(forField)
+          ? settings.track_twitch_subscription
+          : isYoutube(forField)
+            ? settings.track_youtube_subscription
+            : false;
+        if (enabled) {
+          void pushSubscription(msg as Parameters<typeof pushSubscription>[0]);
+        }
+        break;
+      }
+      case 'resubscription': {
+        const enabled = isTwitch(forField)
+          ? settings.track_twitch_resubscription
+          : isYoutube(forField)
+            ? settings.track_youtube_resubscription
+            : false;
+        if (enabled) {
+          void pushResubscription(msg as Parameters<typeof pushResubscription>[0]);
+        }
+        break;
+      }
+      case 'follow': {
+        const enabled = isTwitch(forField)
+          ? settings.track_twitch_follow
+          : isYoutube(forField)
+            ? settings.track_youtube_follow
+            : false;
+        if (enabled) {
+          void pushFollow(msg as Parameters<typeof pushFollow>[0]);
+        }
+        break;
+      }
+      case 'bits':
+        if (isTwitch(forField) && settings.track_twitch_bits) {
+          void pushBits(msg as Parameters<typeof pushBits>[0]);
+        }
+        break;
+      case 'raid':
+        if (isTwitch(forField) && settings.track_twitch_raid) {
+          void pushRaid(msg as Parameters<typeof pushRaid>[0]);
+        }
+        break;
+      case 'host':
+        if (isTwitch(forField) && settings.track_twitch_host) {
+          void pushHost(msg as Parameters<typeof pushHost>[0]);
+        }
+        break;
+      case 'merch':
+        if (settings.track_merch) {
+          void pushMerch(msg as Parameters<typeof pushMerch>[0]);
+        }
+        break;
+    }
+  }
+};
 
 export class StreamLabsSocketClient {
   private connection: WsConnection | null = null;
@@ -66,7 +186,7 @@ export class StreamLabsSocketClient {
       this.destroyConnection(this.connection);
       this.connection = ws;
 
-      const handshake = new Promise<void>((resolve, reject) => {
+      await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('Socket.IO handshake timeout'));
         }, HANDSHAKE_TIMEOUT_MS);
@@ -99,8 +219,6 @@ export class StreamLabsSocketClient {
         });
       });
 
-      await handshake;
-
       ws.On('message', (raw: string) => {
         if (this.destroyed || this.connection !== ws) {
           return;
@@ -131,25 +249,8 @@ export class StreamLabsSocketClient {
           const eventName = parsed[0];
           const eventData = parsed[1] as StreamLabsEvent;
 
-          if (eventName === 'event' && eventData?.type === 'donation') {
-            const donations = eventData.message ?? [];
-            for (const msg of donations) {
-              const rawAmount = msg.amount;
-              const amount =
-                typeof rawAmount === 'number'
-                  ? rawAmount
-                  : typeof rawAmount === 'string'
-                    ? parseFloat(rawAmount)
-                    : 0;
-              void pushDonation({
-                donation_id: String(msg.id ?? msg.donation_id ?? Date.now()),
-                created_at: new Date().toISOString(),
-                currency: msg.currency ?? 'USD',
-                amount: isNaN(amount) ? 0 : amount,
-                name: msg.name ?? 'Anonymous',
-                message: msg.message ?? '',
-              });
-            }
+          if (eventName === 'event' && eventData?.type && Array.isArray(eventData.message)) {
+            void routeEvent(eventData.type, eventData.for, eventData.message);
           }
         } catch {
           // ignore parse errors
