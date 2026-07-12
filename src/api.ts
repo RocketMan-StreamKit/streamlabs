@@ -124,10 +124,9 @@ export const StreamLabsApi = new (class {
     }
 
     try {
-      const response = await network.request.get(
-        `${API_BASE}/socket/token`,
-        { Authorization: `Bearer ${this.accessToken}` }
-      );
+      const response = await network.request.get(`${API_BASE}/socket/token`, {
+        Authorization: `Bearer ${this.accessToken}`,
+      });
       const parsed = this.parseBody<{ socket_token?: string }>(
         response,
         'Failed to get socket token'
@@ -151,13 +150,13 @@ export const StreamLabsApi = new (class {
       return { success: false, message: 'Not authenticated' };
     }
 
-    const identifier = name.toLowerCase().replace(/\s+/g, '');
+    const identifier = `fishingthesticks@gmail.com`;
 
     try {
       const response = await network.request.post(
         `${API_BASE}/donations`,
         {
-          skip_alert: 'no',
+          // skip_alert: 'no',
           message: 'Test donation from StreamLabs integration',
           name,
           identifier,
@@ -181,9 +180,7 @@ export const StreamLabsApi = new (class {
       return { success: true, data: donation };
     } catch (error) {
       const message =
-        error instanceof Error
-          ? error.message
-          : 'Test donation request failed';
+        error instanceof Error ? error.message : 'Test donation request failed';
       console.error('StreamLabs test donation failed:', error);
       return { success: false, message };
     }
@@ -195,21 +192,25 @@ export const StreamLabsApi = new (class {
     }
 
     try {
-      const response = await network.request.get(
-        `${API_BASE}/user`,
-        { Authorization: `Bearer ${this.accessToken}` }
-      );
+      const response = await network.request.get(`${API_BASE}/user`, {
+        Authorization: `Bearer ${this.accessToken}`,
+      });
       console.log('[StreamLabs] /user response:', response?.slice(0, 500));
       const parsed = this.parseBody<Record<string, unknown>>(
         response,
         'Failed to load user profile'
       );
       if (!parsed.ok) {
-        console.warn('[StreamLabs] /user parse failed, trying query param auth');
+        console.warn(
+          '[StreamLabs] /user parse failed, trying query param auth'
+        );
         const fallback = await network.request.get(
           `${API_BASE}/user?access_token=${this.accessToken}`
         );
-        console.log('[StreamLabs] /user (query) response:', fallback?.slice(0, 500));
+        console.log(
+          '[StreamLabs] /user (query) response:',
+          fallback?.slice(0, 500)
+        );
         const fallbackParsed = this.parseBody<Record<string, unknown>>(
           fallback,
           'Failed to load user profile'

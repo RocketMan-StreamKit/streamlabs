@@ -38,6 +38,11 @@ export const OAUTH_AUTHORIZE_URL = 'https://streamlabs.com/api/v2.0/authorize';
 
 export const API_BASE = 'https://streamlabs.com/api/v2.0';
 
-export const SCOPES = ['donations.read', 'socket.token', 'alerts.create'] as const;
+export const SCOPES = [
+  'donations.read',
+  'donations.create',
+  'socket.token',
+  'alerts.create',
+] as const;
 
 export const SOCKET_URL = 'wss://sockets.streamlabs.com/socket.io';

@@ -128,7 +128,9 @@ export const RegenerateConfig = () => {
       }
     );
 
-    const hasToken = !!((access_token || '').trim() || StreamLabsApi.accessToken);
+    const hasToken = !!(
+      (access_token || '').trim() || StreamLabsApi.accessToken
+    );
     if (hasToken) {
       const account = formatAccountLabel(user_name, user_id);
       fields.push({

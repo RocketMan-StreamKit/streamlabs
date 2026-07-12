@@ -43,7 +43,9 @@ events.On('streamlabsAuthCallback', async ({ query }) => {
     const error = typeof query.error === 'string' ? query.error : '';
     if (error) {
       return {
-        redirect: ui.auth.generateFail(pickLang(authMessages.authFailed(error))),
+        redirect: ui.auth.generateFail(
+          pickLang(authMessages.authFailed(error))
+        ),
       };
     }
 
