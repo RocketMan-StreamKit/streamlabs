@@ -7,7 +7,7 @@ import {
   TWITCH_EVENTS,
   YOUTUBE_EVENTS,
 } from './constants';
-import { buildLogoutLabel, formatAccountLabel, logoutFallback } from './locale';
+import { formatAccountLabel } from './locale';
 import { mergeStreamLabsParams } from './params';
 import { startStreamLabsTracking, stopStreamLabsTracking } from './tracking';
 
@@ -46,6 +46,8 @@ events.On('streamlabsTestDonation', async () => {
   }
 });
 
+let lastAccessToken = '';
+
 const clearStreamLabsAuth = () => {
   stopStreamLabsTracking();
   return mergeStreamLabsParams({
@@ -78,6 +80,8 @@ export const RegenerateConfig = () => {
     let user_name =
       typeof params.user_name === 'string' ? params.user_name : '';
     let user_id = typeof params.user_id === 'string' ? params.user_id : '';
+
+    lastAccessToken = access_token;
 
     StreamLabsApi.setApiServer(api_server);
     if (access_token) {
@@ -136,8 +140,20 @@ export const RegenerateConfig = () => {
     fields.push(
       {
         key: 'access_token',
-        type: 'text',
+        type: 'hidden',
         default: '',
+        editor: {
+          label: {
+            en: 'API Access Token',
+            ru: 'API токен',
+            uk: 'API токен',
+          },
+          description: {
+            en: 'Paste your StreamLabs API Access Token.\nGet it at: https://streamlabs.com/dashboard#/settings/api-settings',
+            ru: 'Вставьте ваш API токен StreamLabs.\nПолучить: https://streamlabs.com/dashboard#/settings/api-settings',
+            uk: 'Вставте ваш API токен StreamLabs.\nОтримати: https://streamlabs.com/dashboard#/settings/api-settings',
+          },
+        },
       },
       {
         key: 'token_expires_at',
@@ -150,15 +166,19 @@ export const RegenerateConfig = () => {
       (access_token || '').trim() || StreamLabsApi.accessToken
     );
     if (hasToken) {
-      const account = formatAccountLabel(user_name, user_id);
-      fields.push({
-        type: 'button',
-        key: 'logout',
-        event: 'streamlabsLogout',
-        editor: {
-          label: account ? buildLogoutLabel(account) : logoutFallback,
-        },
-      });
+      if (user_name || user_id) {
+        fields.push({
+          type: 'info',
+          key: 'account_info',
+          editor: {
+            description: {
+              en: `Logged in as: ${formatAccountLabel(user_name, user_id)}`,
+              ru: `Вход выполнен как: ${formatAccountLabel(user_name, user_id)}`,
+              uk: `Вхід виконано як: ${formatAccountLabel(user_name, user_id)}`,
+            },
+          },
+        });
+      }
       fields.push({
         type: 'button',
         key: 'test',
@@ -190,19 +210,6 @@ export const RegenerateConfig = () => {
 
       pushEventFields(fields, YOUTUBE_EVENTS, { en: 'YouTube events', ru: 'События YouTube', uk: 'Події YouTube' }, params);
       pushEventFields(fields, PLATFORM_AGNOSTIC_EVENTS, { en: 'Other events', ru: 'Другие события', uk: 'Інші події' }, params);
-    } else {
-      fields.push({
-        type: 'button',
-        key: 'login',
-        event: 'streamlabsLogin',
-        editor: {
-          label: {
-            en: 'Login via StreamLabs',
-            ru: 'Войти через StreamLabs',
-            uk: 'Увійти через StreamLabs',
-          },
-        },
-      });
     }
 
     GenerateConfig(fields);
@@ -210,3 +217,18 @@ export const RegenerateConfig = () => {
 };
 
 RegenerateConfig();
+
+setInterval(async () => {
+  const params = await api.config.getParams<{ access_token?: string }>();
+  const current = (params.access_token || '').trim();
+  if (current !== lastAccessToken) {
+    lastAccessToken = current;
+    if (current) {
+      StreamLabsApi.accessToken = current;
+      RegenerateConfig();
+    } else {
+      stopStreamLabsTracking();
+      StreamLabsApi.accessToken = null;
+    }
+  }
+}, 3000);
