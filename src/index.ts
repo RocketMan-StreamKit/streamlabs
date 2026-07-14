@@ -1,5 +1,5 @@
 import './auth';
-import { RegenerateConfig } from './config';
+import './config';
 import { PLATFORM } from './constants';
 import { registerStreamLabsOverlayTriggers } from './triggers';
 
@@ -17,5 +17,3 @@ void registerStreamLabsOverlayTriggers();
 status.OnClick(() => {
   api.restart();
 });
-
-RegenerateConfig();

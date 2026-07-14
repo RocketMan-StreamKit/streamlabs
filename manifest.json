@@ -6,9 +6,9 @@
     "uk": "StreamLabs"
   },
   "description": {
-    "en": "StreamLabs integration: OAuth login and donation alerts via API polling.",
-    "ru": "Интеграция StreamLabs: OAuth-авторизация и донаты через API.",
-    "uk": "Інтеграція StreamLabs: OAuth-авторизація та донати через API."
+    "en": "StreamLabs integration: Socket API token and realtime donation alerts.",
+    "ru": "Интеграция StreamLabs: Socket API токен и донаты в реальном времени.",
+    "uk": "Інтеграція StreamLabs: Socket API токен і донати в реальному часі."
   },
   "type": "platform.donation",
   "version": "1.0.1",
@@ -17,7 +17,6 @@
   "permissions": [
     "NETWORK_REQUEST",
     "NETWORK_WEBSOCKET",
-    "WEB_END_POINTS",
     "DASHBOARD_EVENTS",
     "STATUS",
     "NOTIFY"

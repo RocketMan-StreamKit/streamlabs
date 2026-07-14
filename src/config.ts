@@ -1,114 +1,123 @@
 import { StreamLabsApi } from './api';
 import {
-  buildAuthServerSelectOptions,
-  DEFAULT_API_SERVER,
   PLATFORM_AGNOSTIC_EVENTS,
-  resolveApiServerUrl,
   TWITCH_EVENTS,
   YOUTUBE_EVENTS,
 } from './constants';
-import { formatAccountLabel } from './locale';
-import { mergeStreamLabsParams } from './params';
+import { pushDonation } from './dashboard-feed';
+import { formatAccountLabel, logoutFallback } from './locale';
 import { startStreamLabsTracking, stopStreamLabsTracking } from './tracking';
 
-const anyEventEnabled = (events: ReadonlyArray<{ key: string; label: unknown }>, params: Record<string, unknown>) =>
-  events.some(e => params[e.key] === true);
+/**
+ * Returns whether any toggle in the given event list is enabled.
+ * @param events Event field definitions with boolean keys.
+ * @param params Current addon params map.
+ * @returns `true` when at least one event key is `true`.
+ * @example
+ * if (anyEventEnabled(TWITCH_EVENTS, params)) { ... }
+ */
+const anyEventEnabled = (
+  events: ReadonlyArray<{ key: string; label: unknown }>,
+  params: Record<string, unknown>
+) => events.some(e => params[e.key] === true);
 
+/**
+ * Pushes a local test donation into the dashboard (no StreamLabs REST API).
+ * @example
+ * events.On('streamlabsTestDonation', () => { ... });
+ */
 events.On('streamlabsTestDonation', async () => {
   const params = await api.config.getParams<{ user_name?: string }>();
   const donorName = params.user_name?.trim() || 'TestUser';
-  const result = await StreamLabsApi.sendTestDonation(donorName);
 
-  if (result.success) {
+  try {
+    await pushDonation({
+      donation_id: `test-${Date.now()}`,
+      created_at: new Date().toISOString(),
+      currency: 'USD',
+      amount: 1,
+      name: donorName,
+      message: 'Test donation from StreamLabs integration',
+    });
     notify.Send({
       id: 'streamlabs_test_donation',
       type: 'info',
       title: { en: 'StreamLabs', ru: 'StreamLabs', uk: 'StreamLabs' },
       message: {
-        en: 'Test donation sent!',
-        ru: 'Тестовый донат отправлен!',
-        uk: 'Тестовий донат надіслано!',
+        en: 'Test donation sent to dashboard!',
+        ru: 'Тестовый донат отправлен на дашборд!',
+        uk: 'Тестовий донат надіслано на дашборд!',
       },
       temp: true,
     });
-  } else {
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'Unknown error';
     notify.Send({
       id: 'streamlabs_test_donation',
       type: 'error',
       title: { en: 'StreamLabs', ru: 'StreamLabs', uk: 'StreamLabs' },
       message: {
-        en: `Test donation failed: ${result.message || 'Unknown error'}`,
-        ru: `Тестовый донат не отправлен: ${result.message || 'Неизвестная ошибка'}`,
-        uk: `Тестовий донат не надіслано: ${result.message || 'Невідома помилка'}`,
+        en: `Test donation failed: ${detail}`,
+        ru: `Тестовый донат не отправлен: ${detail}`,
+        uk: `Тестовий донат не надіслано: ${detail}`,
       },
       temp: true,
     });
   }
 });
 
-let lastAccessToken = '';
-
-const clearStreamLabsAuth = () => {
-  stopStreamLabsTracking();
-  return mergeStreamLabsParams({
-    access_token: '',
-    token_expires_at: 0,
-    user_name: '',
-    user_id: '',
-  }).then(() => {
-    StreamLabsApi.accessToken = null;
-    RegenerateConfig();
-  });
-};
-
+/**
+ * Appends a section header and boolean toggles for a group of events.
+ * @param fields Config field list being built.
+ * @param events Event definitions with keys and labels.
+ * @param sectionLabel Localized section title.
+ * @example
+ * pushEventFields(fields, TWITCH_EVENTS, { en: 'Twitch events', ru: '...', uk: '...' });
+ */
 const pushEventFields = (
   fields: Parameters<typeof GenerateConfig>[0],
   events: ReadonlyArray<{ key: string; label: Record<string, string> }>,
-  sectionLabel: Record<string, string>,
-  params: Record<string, unknown>
+  sectionLabel: Record<string, string>
 ) => {
-  fields.push({ type: 'info', key: `section_${sectionLabel.en}`, editor: { description: sectionLabel } });
+  fields.push({
+    type: 'info',
+    key: `section_${sectionLabel.en}`,
+    editor: { description: sectionLabel },
+  });
   for (const ev of events) {
-    fields.push({ key: ev.key, type: 'boolean', default: false, editor: { label: ev.label } });
+    fields.push({
+      key: ev.key,
+      type: 'boolean',
+      default: false,
+      editor: { label: ev.label },
+    });
   }
 };
 
+/**
+ * Applies the current token, starts or stops socket tracking, and rebuilds settings UI.
+ * @example
+ * RegenerateConfig();
+ */
+/** Dedupes overlapping rebuilds from load + onParamsUpdated races. */
+let regenerateSeq = 0;
+
 export const RegenerateConfig = () => {
+  const seq = ++regenerateSeq;
   api.config.getParams().then(async params => {
-    const access_token = params.access_token || '';
-    const api_server = resolveApiServerUrl(params.api_server);
-    let user_name =
-      typeof params.user_name === 'string' ? params.user_name : '';
-    let user_id = typeof params.user_id === 'string' ? params.user_id : '';
-
-    lastAccessToken = access_token;
-
-    StreamLabsApi.setApiServer(api_server);
-    if (access_token) {
-      StreamLabsApi.accessToken = access_token;
+    if (seq !== regenerateSeq) {
+      return;
     }
 
-    const effectiveToken = StreamLabsApi.accessToken;
+    const access_token =
+      typeof params.access_token === 'string' ? params.access_token.trim() : '';
+    const user_name =
+      typeof params.user_name === 'string' ? params.user_name : '';
+    const user_id = typeof params.user_id === 'string' ? params.user_id : '';
 
-    if (effectiveToken) {
-      const ok = await StreamLabsApi.ensureAccessToken();
-      if (!ok) {
-        await clearStreamLabsAuth();
-        return;
-      }
+    StreamLabsApi.accessToken = access_token || null;
 
-      const user = await StreamLabsApi.getUser();
-      if (user?.streamlabs) {
-        const newName =
-          user.streamlabs.display_name || user.streamlabs.name || user_name;
-        const newId = String(user.streamlabs.id ?? user_id);
-        if (newName !== user_name || newId !== user_id) {
-          user_name = newName;
-          user_id = newId;
-          await mergeStreamLabsParams({ user_name, user_id });
-        }
-      }
-
+    if (access_token) {
       void startStreamLabsTracking();
     } else {
       stopStreamLabsTracking();
@@ -116,55 +125,45 @@ export const RegenerateConfig = () => {
 
     const fields: Parameters<typeof GenerateConfig>[0] = [];
 
-    if (isDeveloperMode) {
-      fields.push({
-        key: 'api_server',
-        type: 'select',
-        default: DEFAULT_API_SERVER,
-        options: buildAuthServerSelectOptions(isDeveloperMode),
-        editor: {
-          label: {
-            en: 'API Server',
-            ru: 'API сервер',
-            uk: 'API сервер',
-          },
-          description: {
-            en: 'Auth server URL (domain + port)',
-            ru: 'URL сервера авторизации (домен + порт)',
-            uk: 'URL сервера авторизації (домен + порт)',
-          },
+    fields.push({
+      key: 'access_token',
+      type: 'hidden',
+      default: '',
+      editor: {
+        label: {
+          en: 'Socket API Token',
+          ru: 'Socket API токен',
+          uk: 'Socket API токен',
         },
-      });
-    }
-
-    fields.push(
-      {
-        key: 'access_token',
-        type: 'hidden',
-        default: '',
-        editor: {
-          label: {
-            en: 'API Access Token',
-            ru: 'API токен',
-            uk: 'API токен',
-          },
-          description: {
-            en: 'Paste your StreamLabs API Access Token.\nGet it at: https://streamlabs.com/dashboard#/settings/api-settings',
-            ru: 'Вставьте ваш API токен StreamLabs.\nПолучить: https://streamlabs.com/dashboard#/settings/api-settings',
-            uk: 'Вставте ваш API токен StreamLabs.\nОтримати: https://streamlabs.com/dashboard#/settings/api-settings',
-          },
+        description: {
+          en: 'Paste "Your Socket API Token" from StreamLabs → Settings → API Settings → API Tokens.\nDo NOT use the legacy API Token — only the Socket API Token works.',
+          ru: 'Вставьте «Your Socket API Token» из StreamLabs → Settings → API Settings → API Tokens.\nНе используйте legacy API Token — нужен именно Socket API Token.',
+          uk: 'Вставте «Your Socket API Token» з StreamLabs → Settings → API Settings → API Tokens.\nНе використовуйте legacy API Token — потрібен саме Socket API Token.',
         },
       },
-      {
-        key: 'token_expires_at',
-        type: 'number',
-        default: 0,
-      }
-    );
+    });
 
-    const hasToken = !!(
-      (access_token || '').trim() || StreamLabsApi.accessToken
-    );
+    // Kept for backward compatibility with previously stored OAuth params.
+    fields.push({
+      key: 'token_expires_at',
+      type: 'number',
+      default: 0,
+    });
+
+    fields.push({
+      type: 'button',
+      key: 'open_api_settings',
+      event: 'streamlabsOpenApiSettings',
+      editor: {
+        label: {
+          en: 'Open API Settings',
+          ru: 'Открыть API Settings',
+          uk: 'Відкрити API Settings',
+        },
+      },
+    });
+
+    const hasToken = !!access_token;
     if (hasToken) {
       if (user_name || user_id) {
         fields.push({
@@ -172,13 +171,23 @@ export const RegenerateConfig = () => {
           key: 'account_info',
           editor: {
             description: {
-              en: `Logged in as: ${formatAccountLabel(user_name, user_id)}`,
-              ru: `Вход выполнен как: ${formatAccountLabel(user_name, user_id)}`,
-              uk: `Вхід виконано як: ${formatAccountLabel(user_name, user_id)}`,
+              en: `Connected as: ${formatAccountLabel(user_name, user_id)}`,
+              ru: `Подключено как: ${formatAccountLabel(user_name, user_id)}`,
+              uk: `Підключено як: ${formatAccountLabel(user_name, user_id)}`,
             },
           },
         });
       }
+
+      fields.push({
+        type: 'button',
+        key: 'logout',
+        event: 'streamlabsLogout',
+        editor: {
+          label: logoutFallback,
+        },
+      });
+
       fields.push({
         type: 'button',
         key: 'test',
@@ -192,7 +201,11 @@ export const RegenerateConfig = () => {
         },
       });
 
-      pushEventFields(fields, TWITCH_EVENTS, { en: 'Twitch events', ru: 'События Twitch', uk: 'Події Twitch' }, params);
+      pushEventFields(fields, TWITCH_EVENTS, {
+        en: 'Twitch events',
+        ru: 'События Twitch',
+        uk: 'Події Twitch',
+      });
 
       if (anyEventEnabled(TWITCH_EVENTS, params)) {
         fields.push({
@@ -208,8 +221,16 @@ export const RegenerateConfig = () => {
         });
       }
 
-      pushEventFields(fields, YOUTUBE_EVENTS, { en: 'YouTube events', ru: 'События YouTube', uk: 'Події YouTube' }, params);
-      pushEventFields(fields, PLATFORM_AGNOSTIC_EVENTS, { en: 'Other events', ru: 'Другие события', uk: 'Інші події' }, params);
+      pushEventFields(fields, YOUTUBE_EVENTS, {
+        en: 'YouTube events',
+        ru: 'События YouTube',
+        uk: 'Події YouTube',
+      });
+      pushEventFields(fields, PLATFORM_AGNOSTIC_EVENTS, {
+        en: 'Other events',
+        ru: 'Другие события',
+        uk: 'Інші події',
+      });
     }
 
     GenerateConfig(fields);
@@ -218,17 +239,12 @@ export const RegenerateConfig = () => {
 
 RegenerateConfig();
 
-setInterval(async () => {
-  const params = await api.config.getParams<{ access_token?: string }>();
-  const current = (params.access_token || '').trim();
-  if (current !== lastAccessToken) {
-    lastAccessToken = current;
-    if (current) {
-      StreamLabsApi.accessToken = current;
-      RegenerateConfig();
-    } else {
-      stopStreamLabsTracking();
-      StreamLabsApi.accessToken = null;
-    }
-  }
-}, 3000);
+/**
+ * Rebuilds config and reconnects when the user saves settings.
+ * @example
+ * // fired by StreamKit+ after settings edits
+ * events.On('onParamsUpdated', () => RegenerateConfig());
+ */
+events.On('onParamsUpdated', () => {
+  RegenerateConfig();
+});

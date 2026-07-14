@@ -6,7 +6,11 @@
 
 ### For users
 
-StreamLabs integration: OAuth login and donation alerts via API polling.
+StreamLabs integration: paste your **Socket API Token** and receive donations / alerts in realtime.
+
+1. Open [StreamLabs → Settings → API Settings → API Tokens](https://streamlabs.com/dashboard#/settings/api-settings)
+2. Copy **Your Socket API Token** (not the legacy API Token)
+3. Paste it into the addon settings (or use **Open API Settings** in the addon)
 
 **Install:** Settings → Addons → Install from folder (or drag-and-drop the folder/zip into the app window).
 
@@ -33,13 +37,17 @@ Install the `dist/` folder contents (or the release zip) via StreamKit+ settings
 | Field | Value |
 | --- | --- |
 | Type | `platform.donation` |
-| Permissions | NETWORK_REQUEST, WEB_END_POINTS, DASHBOARD_EVENTS, STATUS, NOTIFY |
+| Permissions | NETWORK_REQUEST, NETWORK_WEBSOCKET, DASHBOARD_EVENTS, STATUS, NOTIFY |
 
 ## Русский
 
 ### Для пользователей
 
-Интеграция StreamLabs: OAuth-авторизация и донаты через API.
+Интеграция StreamLabs: вставьте **Socket API Token** и получайте донаты / алерты в реальном времени.
+
+1. Откройте [StreamLabs → Settings → API Settings → API Tokens](https://streamlabs.com/dashboard#/settings/api-settings)
+2. Скопируйте **Your Socket API Token** (не legacy API Token)
+3. Вставьте его в настройки аддона (или нажмите **Открыть API Settings**)
 
 **Установка:** Настройки → Аддоны → Установить из папки (или перетащите папку/zip в окно приложения).
 
@@ -66,13 +74,17 @@ npm run build
 | Поле | Значение |
 | --- | --- |
 | Тип | `platform.donation` |
-| Права | NETWORK_REQUEST, WEB_END_POINTS, DASHBOARD_EVENTS, STATUS, NOTIFY |
+| Права | NETWORK_REQUEST, NETWORK_WEBSOCKET, DASHBOARD_EVENTS, STATUS, NOTIFY |
 
 ## Українська
 
 ### Для користувачів
 
-Інтеграція StreamLabs: OAuth-авторизація та донати через API.
+Інтеграція StreamLabs: вставте **Socket API Token** і отримуйте донати / алерти в реальному часі.
+
+1. Відкрийте [StreamLabs → Settings → API Settings → API Tokens](https://streamlabs.com/dashboard#/settings/api-settings)
+2. Скопіюйте **Your Socket API Token** (не legacy API Token)
+3. Вставте його в налаштування аддона (або натисніть **Відкрити API Settings**)
 
 **Встановлення:** Налаштування → Аддони → Встановити з папки (або перетягніть папку/zip у вікно програми).
 
@@ -99,4 +111,4 @@ npm run build
 | Поле | Значення |
 | --- | --- |
 | Тип | `platform.donation` |
-| Права | NETWORK_REQUEST, WEB_END_POINTS, DASHBOARD_EVENTS, STATUS, NOTIFY |
+| Права | NETWORK_REQUEST, NETWORK_WEBSOCKET, DASHBOARD_EVENTS, STATUS, NOTIFY |

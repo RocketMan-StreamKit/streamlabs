@@ -2,21 +2,33 @@ type LangKey = 'en' | 'ru' | 'uk';
 
 export type LocalizedText = Record<LangKey, string>;
 
+/**
+ * Picks a localized string for the current UI language.
+ * @param text Localized map with required English fallback.
+ * @returns Resolved string for `LANG.current`, or English.
+ * @example
+ * pickLang({ en: 'Hi', ru: 'Привет' });
+ */
 export const pickLang = (text: Partial<LocalizedText> & { en: string }) =>
   text[LANG.current] || text.en;
 
-export const buildLogoutLabel = (account: string): LocalizedText => ({
-  en: `Logout (${account})`,
-  ru: `Выйти (${account})`,
-  uk: `Вийти (${account})`,
-});
-
+/**
+ * Default logout button label.
+ */
 export const logoutFallback: LocalizedText = {
-  en: 'Logout',
-  ru: 'Выйти',
-  uk: 'Вийти',
+  en: 'Clear token',
+  ru: 'Очистить токен',
+  uk: 'Очистити токен',
 };
 
+/**
+ * Formats a user display label from name and/or id.
+ * @param name Optional display name.
+ * @param id Optional account id.
+ * @returns Combined label, or empty string.
+ * @example
+ * formatAccountLabel('Alice', '123'); // 'Alice (123)'
+ */
 export const formatAccountLabel = (name?: string, id?: string) => {
   const trimmedName = name?.trim();
   const trimmedId = id?.trim();
@@ -30,27 +42,4 @@ export const formatAccountLabel = (name?: string, id?: string) => {
     return trimmedId;
   }
   return '';
-};
-
-export const authMessages = {
-  authFailed: (error: string): LocalizedText => ({
-    en: `StreamLabs authorization failed: ${error}`,
-    ru: `Ошибка авторизации StreamLabs: ${error}`,
-    uk: `Помилка авторизації StreamLabs: ${error}`,
-  }),
-  missingCode: {
-    en: 'Missing authorization code',
-    ru: 'Отсутствует код авторизации',
-    uk: 'Відсутній код авторизації',
-  },
-  tokenExchangeFailed: {
-    en: 'Token exchange failed',
-    ru: 'Не удалось обменять токен',
-    uk: 'Не вдалося обміняти токен',
-  },
-  success: {
-    en: 'Authorization successful. You can close this window.',
-    ru: 'Авторизация успешна. Можно закрыть это окно.',
-    uk: 'Авторизацію успішно завершено. Можна закрити це вікно.',
-  },
 };
