@@ -207,6 +207,15 @@ export class StreamLabsSocketClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
+   * Engine.IO v3 client→server ping interval (from the open packet).
+   * Without these pings StreamLabs drops the socket after pingInterval+pingTimeout.
+   */
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Ping interval in ms from the last Engine.IO open packet. */
+  private pingIntervalMs = 10000;
+
+  /**
    * Opens the socket and waits until the Socket.IO handshake completes.
    * @throws When the token is missing or the initial handshake fails.
    * @example
@@ -224,10 +233,8 @@ export class StreamLabsSocketClient {
    */
   stop() {
     this.destroyed = true;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.clearReconnectTimer();
+    this.clearPingTimer();
     this.destroyConnection(this.connection);
     this.connection = null;
   }
@@ -243,6 +250,8 @@ export class StreamLabsSocketClient {
       return;
     }
 
+    this.clearPingTimer();
+
     try {
       const socketToken = await StreamLabsApi.getSocketToken();
       if (!socketToken) {
@@ -250,10 +259,6 @@ export class StreamLabsSocketClient {
       }
 
       const url = `${SOCKET_URL}/?token=${encodeURIComponent(socketToken)}&EIO=3&transport=websocket`;
-      console.log(
-        '[StreamLabs] Connecting socket… token length=',
-        socketToken.length
-      );
       const ws = await network.websocket.connect(url, {});
 
       if (this.destroyed) {
@@ -263,6 +268,9 @@ export class StreamLabsSocketClient {
 
       this.destroyConnection(this.connection);
       this.connection = ws;
+
+      /** Subscriptions created during handshake; removed once live handlers are attached. */
+      const handshakeSubs: Array<{ Destroy: () => void }> = [];
 
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
@@ -274,80 +282,95 @@ export class StreamLabsSocketClient {
           reject(new Error(message));
         };
 
-        ws.On('message', (raw: string) => {
-          if (this.destroyed || this.connection !== ws) {
-            return;
-          }
-
-          try {
-            if (raw === '2') {
-              ws.Send('3');
+        handshakeSubs.push(
+          ws.On('message', (raw: string) => {
+            if (this.destroyed || this.connection !== ws) {
               return;
             }
 
-            // Socket.IO ERROR (packet type 4) — usually bad / wrong token.
-            const errorPayload = removePrefix(raw, '44');
-            if (errorPayload !== null) {
-              let detail = errorPayload;
-              try {
-                const parsed = JSON.parse(errorPayload) as unknown;
-                detail =
-                  typeof parsed === 'string'
-                    ? parsed
-                    : parsed &&
-                        typeof parsed === 'object' &&
-                        'message' in parsed &&
-                        typeof (parsed as { message: unknown }).message ===
-                          'string'
-                      ? (parsed as { message: string }).message
-                      : errorPayload;
-              } catch {
-                // keep raw
+            try {
+              // EIO4-style server ping (harmless if StreamLabs ever sends one).
+              if (raw === '2') {
+                ws.Send('3');
+                return;
               }
-              fail(
-                `StreamLabs authentication failed: ${detail}. Use "Your Socket API Token" from StreamLabs → Settings → API Settings → API Tokens (not the legacy API Token).`
-              );
-              return;
+
+              // Socket.IO ERROR (packet type 4) — usually bad / wrong token.
+              const errorPayload = removePrefix(raw, '44');
+              if (errorPayload !== null) {
+                let detail = errorPayload;
+                try {
+                  const parsed = JSON.parse(errorPayload) as unknown;
+                  detail =
+                    typeof parsed === 'string'
+                      ? parsed
+                      : parsed &&
+                          typeof parsed === 'object' &&
+                          'message' in parsed &&
+                          typeof (parsed as { message: unknown }).message ===
+                            'string'
+                        ? (parsed as { message: string }).message
+                        : errorPayload;
+                } catch {
+                  // keep raw
+                }
+                fail(
+                  `StreamLabs authentication failed: ${detail}. Use "Your Socket API Token" from StreamLabs → Settings → API Settings → API Tokens (not the legacy API Token).`
+                );
+                return;
+              }
+
+              if (raw.startsWith('41')) {
+                fail(
+                  'StreamLabs rejected the socket token. Copy "Your Socket API Token" from API Tokens.'
+                );
+                return;
+              }
+
+              // Server sends CONNECTED (`40`) on its own after Engine.IO open.
+              // Do not reply with another `40` — that closes the socket.
+              if (raw.startsWith('40')) {
+                clearTimeout(timeout);
+                resolve();
+                return;
+              }
+
+              if (raw.startsWith('0')) {
+                this.readPingInterval(raw.slice(1));
+                return;
+              }
+            } catch {
+              // ignore
             }
+          })
+        );
 
-            if (raw.startsWith('41')) {
-              fail(
-                'StreamLabs rejected the socket token. Copy "Your Socket API Token" from API Tokens.'
-              );
-              return;
-            }
+        handshakeSubs.push(
+          ws.On('close', () => {
+            fail('Socket closed during handshake');
+          })
+        );
 
-            // Server sends CONNECTED (`40`) on its own after Engine.IO open.
-            // Do not reply with another `40` — that closes the socket.
-            if (raw.startsWith('40')) {
-              clearTimeout(timeout);
-              resolve();
-              return;
-            }
-
-            if (raw.startsWith('0')) {
-              console.log('[StreamLabs] Engine.IO open:', raw.slice(1, 201));
-              return;
-            }
-
-            console.log('[StreamLabs] Handshake frame:', raw.slice(0, 120));
-          } catch {
-            // ignore
-          }
-        });
-
-        ws.On('close', () => {
-          fail('Socket closed during handshake');
-        });
-
-        ws.On('error', () => {
-          fail('Socket error during handshake');
-        });
+        handshakeSubs.push(
+          ws.On('error', () => {
+            fail('Socket error during handshake');
+          })
+        );
       });
+
+      for (const sub of handshakeSubs) {
+        try {
+          sub.Destroy();
+        } catch {
+          // ignore
+        }
+      }
 
       if (this.destroyed || this.connection !== ws) {
         return;
       }
+
+      this.startPingTimer(ws);
 
       ws.On('message', (raw: string) => {
         if (this.destroyed || this.connection !== ws) {
@@ -355,6 +378,10 @@ export class StreamLabsSocketClient {
         }
 
         try {
+          // Server pong to our Engine.IO v3 ping, or rare server-initiated ping.
+          if (raw === '3') {
+            return;
+          }
           if (raw === '2') {
             ws.Send('3');
             return;
@@ -401,11 +428,78 @@ export class StreamLabsSocketClient {
         // will trigger close
       });
     } catch (error) {
+      this.clearPingTimer();
       if (options.allowReconnect && !this.destroyed) {
         this.scheduleReconnect();
         return;
       }
       throw error;
+    }
+  }
+
+  /**
+   * Reads `pingInterval` from an Engine.IO open JSON payload.
+   * @param openPayload Open packet body after the leading `0`.
+   * @example
+   * this.readPingInterval('{"sid":"x","pingInterval":10000}');
+   */
+  private readPingInterval(openPayload: string) {
+    try {
+      const parsed = JSON.parse(openPayload) as { pingInterval?: unknown };
+      if (
+        typeof parsed.pingInterval === 'number' &&
+        parsed.pingInterval >= 1000 &&
+        parsed.pingInterval <= 120000
+      ) {
+        this.pingIntervalMs = parsed.pingInterval;
+      }
+    } catch {
+      // keep previous / default
+    }
+  }
+
+  /**
+   * Starts Engine.IO v3 client pings (`2`) so StreamLabs does not idle-drop the socket.
+   * @param ws Live websocket that completed the Socket.IO handshake.
+   * @example
+   * this.startPingTimer(ws);
+   */
+  private startPingTimer(ws: WsConnection) {
+    this.clearPingTimer();
+    this.pingTimer = setInterval(() => {
+      if (this.destroyed || this.connection !== ws) {
+        this.clearPingTimer();
+        return;
+      }
+      try {
+        ws.Send('2');
+      } catch {
+        // send failed — close handler will reconnect
+      }
+    }, this.pingIntervalMs);
+  }
+
+  /**
+   * Clears the Engine.IO ping interval if one is running.
+   * @example
+   * this.clearPingTimer();
+   */
+  private clearPingTimer() {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+  }
+
+  /**
+   * Clears a pending reconnect timeout if one is scheduled.
+   * @example
+   * this.clearReconnectTimer();
+   */
+  private clearReconnectTimer() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
   }
 
@@ -419,6 +513,7 @@ export class StreamLabsSocketClient {
       return;
     }
 
+    this.clearPingTimer();
     this.destroyConnection(this.connection);
     this.connection = null;
 
